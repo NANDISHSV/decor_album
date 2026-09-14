@@ -27,18 +27,41 @@ import com.nandi.srctenthouse.ui.CategoryListScreen
 import com.nandi.srctenthouse.ui.DownloadDetailScreen
 import com.nandi.srctenthouse.ui.DownloadsScreen
 import com.nandi.srctenthouse.ui.ReelsScreen
+import android.Manifest
+import android.os.Build
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.google.firebase.messaging.FirebaseMessaging
+import com.nandi.srctenthouse.BuildConfig
+import com.nandi.srctenthouse.data.AppConfigRepository
+import com.nandi.srctenthouse.ui.ForceUpdateScreen
 
 private val InkBackground = Color(0xFF14141F)
 private val IvoryText = Color(0xFFF5EFE6)
 private val MarigoldGold = Color(0xFFD4A24E)
 
 class MainActivity : ComponentActivity() {
+
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         com.google.android.gms.ads.MobileAds.initialize(this) {
             InterstitialAdManager.preload(this)
+
         }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val permissionLauncher = registerForActivityResult(
+                ActivityResultContracts.RequestPermission()
+            ) { /* no-op either way */ }
+            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        FirebaseMessaging.getInstance().subscribeToTopic("all_users")
 
         setContent {
             val darkColors = darkColorScheme(
@@ -54,6 +77,22 @@ class MainActivity : ComponentActivity() {
                 val navController = rememberNavController()
                 val backStackEntry by navController.currentBackStackEntryAsState()
                 val currentRoute = backStackEntry?.destination?.route
+
+                var updateRequired by remember { mutableStateOf(false) }
+                var updateMessage by remember { mutableStateOf("") }
+
+                LaunchedEffect(Unit) {
+                    val config = AppConfigRepository().getUpdateConfig()
+                    if (config != null && BuildConfig.VERSION_CODE < config.minVersionCode) {
+                        updateMessage = config.message
+                        updateRequired = true
+                    }
+                }
+
+                if (updateRequired) {
+                    ForceUpdateScreen(message = updateMessage)
+                    return@MaterialTheme
+                }
 
                 Scaffold(
                     containerColor = InkBackground,
@@ -106,18 +145,30 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.padding(innerPadding).fillMaxSize()
                     ) {
                         composable("categories") {
-                            CategoryListScreen(onCategoryClick = { category ->
-                                InterstitialAdManager.showIfAvailable(this@MainActivity) {
-                                    navController.navigate("photos/${category.id}")
+                            CategoryListScreen(
+                                onCategoryClick = { category ->
+                                    InterstitialAdManager.showIfAvailable(this@MainActivity) {
+                                        navController.navigate("photos/${category.id}")
+                                    }
+                                },
+                                onPhotoFound = { eventId, order ->
+                                    navController.navigate("photos/$eventId?targetOrder=$order")
                                 }
-                            })
+                            )
                         }
                         composable(
-                            "photos/{eventId}",
-                            arguments = listOf(navArgument("eventId") { type = NavType.StringType })
+                            "photos/{eventId}?targetOrder={targetOrder}",
+                            arguments = listOf(
+                                navArgument("eventId") { type = NavType.StringType },
+                                navArgument("targetOrder") {
+                                    type = NavType.IntType
+                                    defaultValue = -1
+                                }
+                            )
                         ) { backStackEntry ->
                             val eventId = backStackEntry.arguments?.getString("eventId") ?: ""
-                            ReelsScreen(eventId = eventId)
+                            val targetOrderArg = backStackEntry.arguments?.getInt("targetOrder") ?: -1
+                            ReelsScreen(eventId = eventId, targetOrder = if (targetOrderArg >= 0) targetOrderArg else null)
                         }
                         composable("downloads") {
                             DownloadsScreen(onImageClick = { index ->

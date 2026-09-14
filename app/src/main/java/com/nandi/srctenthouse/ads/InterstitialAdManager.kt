@@ -36,6 +36,7 @@ object InterstitialAdManager {
     fun showIfAvailable(activity: Activity, onDismissed: () -> Unit) {
         val ad = interstitialAd
         if (ad == null) {
+            preload(activity) // wasn't ready this time — make sure it's loading for next time
             onDismissed()
             return
         }
@@ -49,6 +50,7 @@ object InterstitialAdManager {
 
             override fun onAdFailedToShowFullScreenContent(error: AdError) {
                 interstitialAd = null
+                preload(activity)
                 onDismissed()
             }
         }
